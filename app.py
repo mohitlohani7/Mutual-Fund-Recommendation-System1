@@ -2,155 +2,190 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+from datetime import datetime
 
-st.set_page_config(page_title="Mutual Fund Investment Dashboard", layout="wide")
+st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
-    # Clean & type cast
+    df = pd.read_csv('data/mutual_funds.csv', sep=';')
     df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
     df["1-Year Return (%)"] = pd.to_numeric(df["1-Year Return (%)"], errors='coerce')
     df["3-Year Return (%)"] = pd.to_numeric(df["3-Year Return (%)"], errors='coerce')
     df["5-Year Return (%)"] = pd.to_numeric(df["5-Year Return (%)"], errors='coerce')
-    df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     return df.dropna(subset=["Net Asset Value (NAV)"])
 
 df = load_data()
 
-st.title("📊 Mutual Fund Investment Dashboard & Calculator")
-st.markdown("""
-Welcome! Select your risk appetite, choose a mutual fund, and estimate your investment maturity amount with SIP or Lump Sum options.
-""")
+# === Add Derived Features ===
 
-# --- Step 1: User Risk Appetite ---
-risk_profile = st.selectbox("Select Your Risk Appetite:", options=["Low", "Moderate", "High"])
+# Fund Age in years (approx)
+today = pd.to_datetime('today')
+df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
 
-# Filter funds by risk
-filtered_funds = df[df["Risk Level"].str.lower() == risk_profile.lower()]
-if filtered_funds.empty:
-    st.warning("No mutual funds found for selected risk profile. Please try another risk level.")
+# Categorize fund type based on Scheme Name keywords
+def assign_category(name):
+    name = name.lower()
+    if 'large cap' in name:
+        return 'Large Cap'
+    elif 'midcap' in name or 'mid cap' in name:
+        return 'Mid Cap'
+    elif 'small cap' in name or 'smallcap' in name:
+        return 'Small Cap'
+    elif 'tax saver' in name or 'tax relief' in name or 'tax plan' in name:
+        return 'Tax Saver'
+    elif 'balanced' in name or 'hybrid' in name:
+        return 'Hybrid'
+    else:
+        return 'Others'
+
+df['Category'] = df['Scheme Name'].apply(assign_category)
+
+# Simulate AUM (Assets Under Management) in crores randomly for demo (10 - 10000 cr)
+np.random.seed(42)
+df['AUM (Crores INR)'] = np.random.randint(10, 10000, size=len(df))
+
+# Map Risk Level to numeric for scoring (Low=1, Moderate=2, High=3)
+risk_map = {'Low': 1, 'Moderate': 2, 'High': 3}
+df['Risk Score'] = df['Risk Level'].map(risk_map).fillna(2)
+
+# Calculate Momentum Score = (1Y + 3Y)/2 - 5Y return (indicates recent trend)
+df['Momentum'] = ((df['1-Year Return (%)'] + df['3-Year Return (%)']) / 2) - df['5-Year Return (%)']
+
+# Normalize columns for scoring
+def min_max_norm(series):
+    return (series - series.min()) / (series.max() - series.min())
+
+df['Norm 3Y Return'] = min_max_norm(df['3-Year Return (%)'])
+df['Norm AUM'] = min_max_norm(df['AUM (Crores INR)'])
+df['Norm Risk'] = 1 - min_max_norm(df['Risk Score'])  # invert so low risk is higher score
+df['Norm Momentum'] = min_max_norm(df['Momentum'])
+
+# Composite Score for ranking
+df['Score'] = (
+    df['Norm 3Y Return'] * 0.7 +
+    df['Norm AUM'] * 0.15 +
+    df['Norm Risk'] * 0.10 +
+    df['Norm Momentum'] * 0.05
+)
+
+# === Streamlit UI ===
+
+st.title("🚀 Advanced Mutual Fund Recommendation System")
+
+# Sidebar inputs
+risk_input = st.sidebar.selectbox("Select your Risk Appetite", ['Low', 'Moderate', 'High'])
+category_input = st.sidebar.multiselect("Select Fund Category", options=df['Category'].unique(), default=df['Category'].unique())
+min_aum_input = st.sidebar.slider("Minimum AUM (Crores INR)", 0, int(df['AUM (Crores INR)'].max()), 100)
+
+inv_type = st.sidebar.radio("Investment Type", ['Lump Sum', 'SIP'])
+
+if inv_type == 'Lump Sum':
+    lump_sum_amount = st.sidebar.number_input("Lump Sum Amount (₹)", min_value=1000, step=1000, value=50000)
+    inv_period = st.sidebar.slider("Investment Period (Years)", 1, 20, 5)
+else:
+    sip_amount = st.sidebar.number_input("Monthly SIP Amount (₹)", min_value=500, step=500, value=5000)
+    inv_period = st.sidebar.slider("Investment Period (Years)", 1, 20, 5)
+
+# Filter based on inputs
+filtered_df = df[
+    (df['Risk Level'] == risk_input) &
+    (df['Category'].isin(category_input)) &
+    (df['AUM (Crores INR)'] >= min_aum_input)
+]
+
+if filtered_df.empty:
+    st.warning("No funds match your filter criteria.")
     st.stop()
 
-# --- Step 2: Select Fund ---
-selected_fund_name = st.selectbox("Select Mutual Fund:", filtered_funds["Scheme Name"].unique())
-fund_df = filtered_funds[filtered_funds["Scheme Name"] == selected_fund_name].sort_values("Date")
+# Sort by score desc
+filtered_df = filtered_df.sort_values(by='Score', ascending=False)
 
-st.markdown(f"### Fund Details for **{selected_fund_name}**")
-latest_nav = fund_df.iloc[-1]["Net Asset Value (NAV)"]
-st.write(f"**Latest NAV:** ₹{latest_nav:.2f}")
-st.write(f"**Risk Level:** {risk_profile}")
-st.write(f"**5-Year Return:** {fund_df.iloc[-1]['5-Year Return (%)']:.2f}%")
+# Show top 3 recommended funds with explanations
+st.subheader("Top 3 Recommended Funds")
+for idx, row in filtered_df.head(3).iterrows():
+    st.markdown(f"### {row['Scheme Name']}  (Score: {row['Score']:.3f})")
+    st.write(f"- **Category:** {row['Category']}")
+    st.write(f"- **Risk Level:** {row['Risk Level']}")
+    st.write(f"- **AUM:** ₹{row['AUM (Crores INR)']:.2f} Crores")
+    st.write(f"- **3Y Return:** {row['3-Year Return (%)']:.2f}%")
+    st.write(f"- **Momentum:** {row['Momentum']:.2f} (Recent performance trend)")
+    st.write(f"**Why recommended:** This fund has a strong 3-year return, sizable AUM, appropriate risk, and positive momentum.")
 
-# --- Step 3: Investment Type ---
-investment_type = st.radio("Choose Investment Type:", ["Lump Sum", "SIP"])
-
-# --- Step 4: Investment Inputs ---
-col1, col2 = st.columns(2)
-
-if investment_type == "Lump Sum":
-    with col1:
-        principal = st.number_input("Investment Amount (₹)", min_value=1000, step=1000, value=50000)
-    monthly_investment = None
-    with col2:
-        duration_years = st.slider("Investment Duration (years)", 1, 30, 5)
-else:
-    with col1:
-        monthly_investment = st.number_input("Monthly SIP Amount (₹)", min_value=1000, step=1000, value=5000)
-    principal = None
-    with col2:
-        duration_years = st.slider("Investment Duration (years)", 1, 30, 5)
-
-# --- Step 5: Calculate Maturity ---
-
-cagr = fund_df.iloc[-1]["5-Year Return (%)"] / 100
-
-def compound_interest(principal, rate, time):
-    return principal * (1 + rate) ** time
-
-def calculate_sip_maturity(monthly_amount, rate, years):
-    r = rate / 12
-    n = years * 12
-    maturity = monthly_amount * (( (1 + r) ** n - 1) / r) * (1 + r)
-    return maturity
-
-if investment_type == "Lump Sum":
-    maturity_amount = compound_interest(principal, cagr, duration_years)
-    total_invested = principal
-else:
-    maturity_amount = calculate_sip_maturity(monthly_investment, cagr, duration_years)
-    total_invested = monthly_investment * 12 * duration_years
-
-interest_earned = maturity_amount - total_invested
-
-# --- Step 6: Show Results ---
-st.subheader("Investment Summary")
-st.write(f"**Total Principal Invested:** ₹{total_invested:,.2f}")
-st.write(f"**Estimated Maturity Amount:** ₹{maturity_amount:,.2f}")
-st.write(f"**Interest Earned:** ₹{interest_earned:,.2f}")
-st.write(f"**Approximate CAGR used for calculation:** {cagr*100:.2f}%")
-
-# --- Step 7: Visualizations ---
-
-summary_df = pd.DataFrame({
-    "Amount": [total_invested, maturity_amount],
-    "Type": ["Principal Invested", "Maturity Amount"]
-})
-
-fig_bar = px.bar(summary_df, x="Type", y="Amount", color="Type", text="Amount", title="Investment vs Maturity")
-fig_bar.update_traces(texttemplate='₹%{text:.2s}', textposition='outside')
-st.plotly_chart(fig_bar, use_container_width=True)
-
-st.subheader("Sample Asset Allocation in This Mutual Fund")
-asset_alloc = {
-    "Equity": 65,
-    "Debt": 25,
-    "Cash & Others": 10
-}
-fig_pie = px.pie(
-    names=list(asset_alloc.keys()),
-    values=list(asset_alloc.values()),
-    title="Asset Allocation",
-    hole=0.4,
-    color_discrete_sequence=px.colors.sequential.RdBu
+# Performance scatter plot (Risk vs Return, bubble size = AUM)
+fig = px.scatter(
+    filtered_df,
+    x='Risk Score',
+    y='3-Year Return (%)',
+    size='AUM (Crores INR)',
+    color='Category',
+    hover_name='Scheme Name',
+    title='Risk vs 3-Year Return of Funds (Bubble size = AUM)',
+    labels={'Risk Score': 'Risk (1=Low, 3=High)', '3-Year Return (%)': '3-Year Return (%)'}
 )
+st.plotly_chart(fig, use_container_width=True)
+
+# Investment Calculator
+st.header("Investment Calculator")
+
+if inv_type == 'Lump Sum':
+    annual_return = filtered_df.iloc[0]['3-Year Return (%)'] / 100
+    principal = lump_sum_amount
+    years = inv_period
+    maturity_value = principal * ((1 + annual_return) ** years)
+
+    st.write(f"### Lump Sum Investment: ₹{principal}")
+    st.write(f"### Estimated Maturity Value after {years} years: ₹{maturity_value:,.2f}")
+
+    timeline = list(range(years+1))
+    values = [principal * ((1 + annual_return) ** y) for y in timeline]
+
+    df_growth = pd.DataFrame({
+        "Year": timeline,
+        "Investment Value": values,
+        "Principal": [principal]* (years+1)
+    })
+
+    fig2 = px.line(df_growth, x='Year', y=['Principal', 'Investment Value'], title='Investment Growth Over Time', markers=True)
+    st.plotly_chart(fig2, use_container_width=True)
+
+else:
+    months = inv_period * 12
+    annual_return = filtered_df.iloc[0]['3-Year Return (%)'] / 100
+    monthly_return = (1 + annual_return) ** (1/12) - 1
+    sip = sip_amount
+
+    fv = sip * (((1 + monthly_return) ** months - 1) / monthly_return) * (1 + monthly_return)
+
+    st.write(f"### SIP Amount per month: ₹{sip}")
+    st.write(f"### Investment Period: {inv_period} years")
+    st.write(f"### Estimated Maturity Value: ₹{fv:,.2f}")
+
+    timeline = list(range(inv_period + 1))
+    fv_list = []
+    for y in timeline:
+        m = y * 12
+        if m == 0:
+            fv_list.append(0)
+        else:
+            fv_list.append(sip * (((1 + monthly_return) ** m - 1) / monthly_return) * (1 + monthly_return))
+
+    df_sip_growth = pd.DataFrame({
+        "Year": timeline,
+        "Investment Value": fv_list,
+        "Principal": [sip*12*y for y in timeline]
+    })
+
+    fig3 = px.line(df_sip_growth, x='Year', y=['Principal', 'Investment Value'], title='SIP Growth Over Time', markers=True)
+    st.plotly_chart(fig3, use_container_width=True)
+
+# Category Pie Chart for filtered funds
+st.header("Fund Categories Distribution")
+cat_counts = filtered_df['Category'].value_counts()
+fig_pie = px.pie(values=cat_counts.values, names=cat_counts.index, title='Categories in Your Filtered Funds')
 st.plotly_chart(fig_pie, use_container_width=True)
 
-# --- Step 8: Year-wise breakdown table ---
-st.subheader("Year-wise Investment Growth")
-
-years = list(range(duration_years + 1))
-
-if investment_type == "Lump Sum":
-    principal_over_years = [principal] * len(years)
-    maturity_over_years = [compound_interest(principal, cagr, y) for y in years]
-    interest_over_years = [maturity_over_years[i] - principal_over_years[i] for i in range(len(years))]
-else:
-    principal_over_years = [monthly_investment * 12 * y for y in years]
-    maturity_over_years = [calculate_sip_maturity(monthly_investment, cagr, y) for y in years]
-    interest_over_years = [maturity_over_years[i] - principal_over_years[i] for i in range(len(years))]
-
-table_data = pd.DataFrame({
-    "Year": years,
-    "Principal Invested (₹)": [f"{x:,.2f}" for x in principal_over_years],
-    "Interest Earned (₹)": [f"{x:,.2f}" for x in interest_over_years],
-    "Maturity Amount (₹)": [f"{x:,.2f}" for x in maturity_over_years],
-})
-
-st.dataframe(table_data)
-
-# --- Step 9: Recommendation Explanation ---
-st.subheader("Why This Mutual Fund is Recommended for You")
-
-reason = f"""
-- Based on your selected risk appetite (**{risk_profile}**), this fund fits well as it is categorized under the same risk level.
-- The fund has delivered an average 5-year return of **{cagr*100:.2f}%**, which aligns with your investment horizon of {duration_years} years.
-- It has a diversified asset allocation to balance growth and safety.
-- Suitable for investors looking for a **{'stable' if risk_profile=='Low' else 'balanced' if risk_profile=='Moderate' else 'growth-focused'}** portfolio.
-- Choosing this fund helps you invest confidently in line with your financial goals and risk tolerance.
-"""
-
-st.markdown(reason)
-
 st.markdown("---")
-st.caption("Note: The maturity and returns are estimates based on historical CAGR. Actual returns may vary. Please consult a financial advisor before investing.")
+st.markdown("© 2025 Mutual Fund Recommender Pro | For educational & demo purposes only.")
+

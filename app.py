@@ -46,27 +46,29 @@ st.write(f"**5-Year Return:** {fund_df.iloc[-1]['5-Year Return (%)']:.2f}%")
 investment_type = st.radio("Choose Investment Type:", ["Lump Sum", "SIP"])
 
 # --- Step 4: Investment Inputs ---
-col1, col2, col3 = st.columns(3)
-with col1:
-    principal = st.number_input("Investment Amount (₹)", min_value=1000, step=1000, value=50000)
-with col2:
-    duration_years = st.slider("Investment Duration (years)", 1, 30, 5)
-with col3:
-    if investment_type == "SIP":
+col1, col2 = st.columns(2)
+
+if investment_type == "Lump Sum":
+    with col1:
+        principal = st.number_input("Investment Amount (₹)", min_value=1000, step=1000, value=50000)
+    monthly_investment = None
+    with col2:
+        duration_years = st.slider("Investment Duration (years)", 1, 30, 5)
+else:
+    with col1:
         monthly_investment = st.number_input("Monthly SIP Amount (₹)", min_value=1000, step=1000, value=5000)
-    else:
-        monthly_investment = None
+    principal = None
+    with col2:
+        duration_years = st.slider("Investment Duration (years)", 1, 30, 5)
 
 # --- Step 5: Calculate Maturity ---
 
-# Use 5-Year Return (%) as approx CAGR for calculation
 cagr = fund_df.iloc[-1]["5-Year Return (%)"] / 100
 
 def compound_interest(principal, rate, time):
     return principal * (1 + rate) ** time
 
 def calculate_sip_maturity(monthly_amount, rate, years):
-    # Monthly rate approx
     r = rate / 12
     n = years * 12
     maturity = monthly_amount * (( (1 + r) ** n - 1) / r) * (1 + r)
@@ -90,7 +92,6 @@ st.write(f"**Approximate CAGR used for calculation:** {cagr*100:.2f}%")
 
 # --- Step 7: Visualizations ---
 
-# Principal vs Maturity bar chart
 summary_df = pd.DataFrame({
     "Amount": [total_invested, maturity_amount],
     "Type": ["Principal Invested", "Maturity Amount"]
@@ -100,8 +101,6 @@ fig_bar = px.bar(summary_df, x="Type", y="Amount", color="Type", text="Amount", 
 fig_bar.update_traces(texttemplate='₹%{text:.2s}', textposition='outside')
 st.plotly_chart(fig_bar, use_container_width=True)
 
-# Pie chart for Asset Allocation (dummy example)
-# You can replace with real data if you have sector allocation info
 st.subheader("Sample Asset Allocation in This Mutual Fund")
 asset_alloc = {
     "Equity": 65,
@@ -118,16 +117,15 @@ fig_pie = px.pie(
 st.plotly_chart(fig_pie, use_container_width=True)
 
 # --- Step 8: Year-wise breakdown table ---
-
 st.subheader("Year-wise Investment Growth")
 
+years = list(range(duration_years + 1))
+
 if investment_type == "Lump Sum":
-    years = list(range(duration_years + 1))
     principal_over_years = [principal] * len(years)
     maturity_over_years = [compound_interest(principal, cagr, y) for y in years]
     interest_over_years = [maturity_over_years[i] - principal_over_years[i] for i in range(len(years))]
 else:
-    years = list(range(duration_years + 1))
     principal_over_years = [monthly_investment * 12 * y for y in years]
     maturity_over_years = [calculate_sip_maturity(monthly_investment, cagr, y) for y in years]
     interest_over_years = [maturity_over_years[i] - principal_over_years[i] for i in range(len(years))]
@@ -141,16 +139,18 @@ table_data = pd.DataFrame({
 
 st.dataframe(table_data)
 
-# --- Step 9: Why invest here? ---
-st.subheader("Why Invest in This Fund?")
-st.markdown(f"""
-- **Risk Level:** {risk_profile}  
-- **5-Year CAGR:** {cagr*100:.2f}% (approx.)  
-- **Diversified asset allocation** to balance growth and safety.  
-- Regularly monitored by professional fund managers.  
-- Suitable for investors looking for a **{'stable' if risk_profile=='Low' else 'balanced' if risk_profile=='Moderate' else 'high growth'}** portfolio.  
-""")
+# --- Step 9: Recommendation Explanation ---
+st.subheader("Why This Mutual Fund is Recommended for You")
+
+reason = f"""
+- Based on your selected risk appetite (**{risk_profile}**), this fund fits well as it is categorized under the same risk level.
+- The fund has delivered an average 5-year return of **{cagr*100:.2f}%**, which aligns with your investment horizon of {duration_years} years.
+- It has a diversified asset allocation to balance growth and safety.
+- Suitable for investors looking for a **{'stable' if risk_profile=='Low' else 'balanced' if risk_profile=='Moderate' else 'growth-focused'}** portfolio.
+- Choosing this fund helps you invest confidently in line with your financial goals and risk tolerance.
+"""
+
+st.markdown(reason)
 
 st.markdown("---")
-st.caption("Note: This is a simulation using historical returns. Actual returns may vary. Always consult a financial advisor before investing.")
-
+st.caption("Note: The maturity and returns are estimates based on historical CAGR. Actual returns may vary. Please consult a financial advisor before investing.")

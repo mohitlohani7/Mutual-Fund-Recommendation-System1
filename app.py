@@ -1,87 +1,70 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import numpy as np
-import os
+from datetime import datetime
 
-# Load data
+st.set_page_config(page_title="Mutual Fund Dashboard", layout="wide")
+
 @st.cache_data
+
 def load_data():
-    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=';')
+    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=";")
+    df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
+    df["Net Asset Value"] = pd.to_numeric(df["Net Asset Value"], errors='coerce')
+    df = df.dropna(subset=["Date", "Net Asset Value"])
     return df
 
 df = load_data()
 
-# App title and tabs
-st.set_page_config(page_title="Smart Mutual Fund Dashboard", layout="wide")
-st.title("💹 Smart Mutual Fund Investment Platform")
-tabs = st.tabs(["🏦 Explore Funds", "🧮 SIP/Maturity Calculator", "📊 Compare Funds", "📘 About"])
+st.title("📊 Mutual Fund Investment Dashboard")
 
-# Explore Funds Tab
-with tabs[0]:
-    st.header("📈 Explore Mutual Fund Details")
+with st.sidebar:
+    st.header("🧮 Investment Calculator")
+    amount = st.number_input("💰 Monthly SIP Amount (₹)", min_value=500, step=500)
+    years = st.slider("📆 Investment Duration (Years)", 1, 30, 10)
+    expected_rate = st.slider("📈 Expected Annual Return (%)", 5.0, 20.0, 12.0)
 
-    selected_fund = st.selectbox("Choose a Mutual Fund Scheme:", df["Scheme Name"].unique())
-    fund_df = df[df["Scheme Name"] == selected_fund]
+    months = years * 12
+    rate = expected_rate / 100 / 12
 
-    # Show NAV trend
-    st.subheader(f"NAV Trend - {selected_fund}")
-    fig = px.line(fund_df.sort_values("Date"), x="Date", y="Net Asset Value", title="NAV Over Time")
+    maturity_value = amount * (((1 + rate)**months - 1) * (1 + rate)) / rate
+    st.metric("Estimated Maturity Value", f"₹ {maturity_value:,.0f}")
+
+    st.markdown("---")
+
+fund_names = sorted(df["Scheme Name"].unique())
+selected_fund = st.selectbox("Select a Mutual Fund", fund_names)
+fund_df = df[df["Scheme Name"] == selected_fund].copy()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📉 Net Asset Value Over Time")
+    fund_df["Date"] = pd.to_datetime(fund_df["Date"], errors='coerce')
+    fund_df = fund_df.dropna(subset=["Date", "Net Asset Value"])
+    fund_df = fund_df.sort_values("Date")
+    fig = px.line(fund_df, x="Date", y="Net Asset Value", title="NAV Over Time", markers=True)
     st.plotly_chart(fig, use_container_width=True)
 
-    # Simulated asset allocation pie chart
-    st.subheader("Asset Allocation")
+with col2:
+    st.subheader("📊 Asset Allocation (Sample)")
     pie_data = pd.DataFrame({
-        "Type": ["Equity", "Debt", "Cash"],
-        "Allocation": np.random.dirichlet(np.ones(3), size=1)[0]
+        "Category": ["Equity", "Debt", "Cash", "Others"],
+        "Allocation %": np.random.dirichlet(np.ones(4), size=1).flatten() * 100
     })
-    fig_pie = px.pie(pie_data, names='Type', values='Allocation', title='Portfolio Allocation')
-    st.plotly_chart(fig_pie, use_container_width=True)
+    fig2 = px.pie(pie_data, names="Category", values="Allocation %", title="Asset Allocation")
+    st.plotly_chart(fig2, use_container_width=True)
 
-# Investment Calculator Tab
-with tabs[1]:
-    st.header("🧮 Mutual Fund Investment Calculator")
+st.markdown("---")
 
-    investment_type = st.radio("Investment Type", ["One-time", "SIP"])
-    amount = st.number_input("Investment Amount (₹)", min_value=1000, step=1000)
-    duration = st.slider("Investment Duration (Years)", 1, 30, 5)
-    expected_return = st.slider("Expected Annual Return (%)", 5, 20, 12)
+st.subheader("📌 Fund Summary")
 
-    if investment_type == "One-time":
-        maturity_value = amount * (1 + expected_return / 100) ** duration
-    else:
-        maturity_value = amount * (((1 + expected_return / 100) ** duration - 1) * (1 + expected_return / 100)) / (expected_return / 100)
+latest_nav = fund_df.sort_values("Date", ascending=False).iloc[0]
 
-    total_invested = amount if investment_type == "One-time" else amount * duration
-    gain = maturity_value - total_invested
+st.write(f"**Fund Name**: {selected_fund}")
+st.write(f"**Latest NAV (₹)**: {latest_nav['Net Asset Value']:.2f} on {latest_nav['Date'].date()}")
+st.write("**ISIN Growth:**", latest_nav["ISIN Div Payout/ ISIN Growth"])
+st.write("**ISIN Reinvestment:**", latest_nav["ISIN Div Reinvestment"])
 
-    st.metric("Maturity Value", f"₹{maturity_value:,.2f}")
-    st.metric("Total Gain", f"₹{gain:,.2f}")
-
-    fig = px.bar(x=["Invested", "Gain"], y=[total_invested, gain], labels={'x':"", 'y':"Amount (₹)"}, title="Investment vs Gain")
-    st.plotly_chart(fig, use_container_width=True)
-
-# Compare Funds Tab
-with tabs[2]:
-    st.header("📊 Compare Mutual Funds")
-    compare_funds = st.multiselect("Select Multiple Funds to Compare:", df["Scheme Name"].unique(), default=df["Scheme Name"].unique()[:3])
-
-    if compare_funds:
-        comp_df = df[df["Scheme Name"].isin(compare_funds)]
-        comp_df_latest = comp_df.sort_values("Date").drop_duplicates("Scheme Name", keep='last')
-        fig = px.bar(comp_df_latest, x="Scheme Name", y="Net Asset Value", color="Scheme Name", title="Latest NAV Comparison")
-        st.plotly_chart(fig, use_container_width=True)
-
-# About Tab
-with tabs[3]:
-    st.header("📘 About this Dashboard")
-    st.markdown("""
-        This professional-grade mutual fund dashboard helps investors:
-        - Explore real-time NAVs and fund performance.
-        - Use an inbuilt maturity calculator.
-        - Compare funds using interactive graphs.
-        - Understand where their money is invested using pie charts.
-        
-        _Designed to feel like the Groww experience._ 💼
-    """)
+st.info("This dashboard provides estimated data. Please consult a financial advisor before investing.")

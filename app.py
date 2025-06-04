@@ -1,45 +1,79 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
+from datetime import datetime
 
+# ------------------ Load Data ------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
-    df["NAV"] = pd.to_numeric(df["NAV"], errors='coerce')
+    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=';')
+    df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
     df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
-    df = df.dropna(subset=["NAV", "Date"])
+    df.dropna(inplace=True)
     return df
 
-def maturity_amount_lumpsum(principal, rate, years):
-    return principal * ((1 + rate/100) ** years)
+# ------------------ Investment Calculator ------------------
+def calculate_maturity(principal, years, rate):
+    maturity = principal * ((1 + rate/100) ** years)
+    return maturity
 
-def maturity_amount_sip(monthly, rate, years):
-    n = years * 12
-    r = rate / (12 * 100)
-    return monthly * (((1 + r) ** n - 1) * (1 + r)) / r
+def compound_interest_table(principal, years, rate):
+    data = []
+    for year in range(1, years + 1):
+        interest = principal * ((1 + rate/100) ** year)
+        data.append({"Year": year, "Principal + Interest": round(interest, 2)})
+    return pd.DataFrame(data)
 
-# Load data
+# ------------------ Main App ------------------
+st.set_page_config(page_title="Mutual Fund Advisor Dashboard", layout="wide")
+st.title("📊 Mutual Fund Recommendation and Investment Calculator")
+
+# Load Data
 df = load_data()
-st.set_page_config(page_title="Mutual Fund Explorer", layout="wide")
-
-st.title("📊 Mutual Fund Investment Dashboard")
 
 # Sidebar Filters
 st.sidebar.header("🔍 Filter Funds")
-fund_names = df["Scheme Name"].unique()
-selected_fund = st.sidebar.selectbox("Choose a Mutual Fund", fund_names)
+risk_level = st.sidebar.selectbox("Select Risk Level", options=["Low", "Medium", "High"])
 
-risk_levels = df["Risk"].unique().tolist()
-selected_risk = st.sidebar.multiselect("Select Risk Level", risk_levels, default=risk_levels)
+filtered_df = df[df["Risk Level"] == risk_level]
 
-filtered_df = df[(df["Scheme Name"] == selected_fund) & (df["Risk"].isin(selected_risk))]
+# Fund Selector
+funds = filtered_df["Scheme Name"].unique()
+selected_fund = st.selectbox("Choose a Mutual Fund Scheme", funds)
+fund_df = filtered_df[filtered_df["Scheme Name"] == selected_fund].sort_values("Date")
 
-# Line Graph - NAV over time
-st.subheader(f"NAV Over Time - {selected_fund}")
-if not filtered_df.empty:
-    fig = px.line(filtered_df.sort_values("Date"), x="Date", y="NAV", title=f"{selected_fund} NAV Trend")
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("No data available for selected filters.")
+# Fund Details
+st.subheader("📈 Fund Performance Overview")
+st.write(f"**Selected Scheme:** {selected_fund}")
+st.write(f"**Risk Level:** {risk_level}")
+st.write(f"**Latest NAV:** ₹{fund_df.iloc[-1]['Net Asset Value (NAV)']:.2f}")
 
-# Pie C
+# Line Chart - NAV over Time
+fig = px.line(fund_df, x="Date", y="Net Asset Value (NAV)", title="NAV Over Time")
+st.plotly_chart(fig, use_container_width=True)
+
+# Pie Chart - Dummy Allocation (since real allocation not present)
+st.subheader("💡 Asset Allocation (Dummy)")
+st.plotly_chart(px.pie(values=[60, 25, 15], names=["Equity", "Debt", "Others"], title="Estimated Asset Allocation"))
+
+# Investment Calculator
+st.subheader("💰 Mutual Fund Maturity Calculator")
+principal = st.number_input("Enter Investment Amount (₹)", min_value=1000, step=1000)
+years = st.slider("Select Investment Duration (Years)", 1, 30, 5)
+avg_rate = float(fund_df.iloc[-1]['5-Year Return (%)']) if years >= 5 else float(fund_df.iloc[-1]['3-Year Return (%)']) if years >= 3 else float(fund_df.iloc[-1]['1-Year Return (%)'])
+
+maturity_amount = calculate_maturity(principal, years, avg_rate)
+st.success(f"📢 Estimated Maturity Amount: ₹{maturity_amount:,.2f}")
+
+# Maturity Bar Chart
+bar_df = pd.DataFrame({"Amount Type": ["Principal", "Maturity"], "Value": [principal, maturity_amount]})
+st.plotly_chart(px.bar(bar_df, x="Amount Type", y="Value", color="Amount Type", title="Principal vs Maturity"), use_container_width=True)
+
+# Compound Table
+st.subheader("📅 Year-wise Compound Interest Table")
+compound_df = compound_interest_table(principal, years, avg_rate)
+st.dataframe(compound_df)
+
+# Recommendation Reasoning
+st.info(f"✅ Based on your risk appetite (**{risk_level}**) and investment horizon (**{years} years**), the fund **{selected_fund}** is suitable due to an average return of **{avg_rate}%**.\n\nThis can help your investment grow steadily over time with calculated risk.")

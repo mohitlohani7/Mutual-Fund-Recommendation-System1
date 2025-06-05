@@ -11,51 +11,54 @@ def load_data():
     df = pd.read_csv('mutual funds enriched.csv', sep=';')
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
+
+    # === Add Derived Features ===
+    today = pd.to_datetime('today')
+    df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
+
+    def assign_category(name):
+        name = name.lower()
+        if 'large cap' in name:
+            return 'Large Cap'
+        elif 'midcap' in name or 'mid cap' in name:
+            return 'Mid Cap'
+        elif 'small cap' in name or 'smallcap' in name:
+            return 'Small Cap'
+        elif 'tax saver' in name or 'tax relief' in name or 'tax plan' in name:
+            return 'Tax Saver'
+        elif 'balanced' in name or 'hybrid' in name:
+            return 'Hybrid'
+        else:
+            return 'Others'
+
+    df['Category'] = df['Scheme Name'].apply(assign_category)
+
+    np.random.seed(42)
+    df['AUM (Crores INR)'] = np.random.randint(10, 10000, size=len(df))
+
+    risk_map = {'Low': 1, 'Moderate': 2, 'High': 3}
+    df['Risk Score'] = df['Risk Level'].map(risk_map).fillna(2)
+
+    df['Momentum'] = ((df['1-Year Return (%)'] + df['3-Year Return (%)']) / 2) - df['5-Year Return (%)']
+
+    def min_max_norm(series):
+        return (series - series.min()) / (series.max() - series.min())
+
+    df['Norm 3Y Return'] = min_max_norm(df['3-Year Return (%)'])
+    df['Norm AUM'] = min_max_norm(df['AUM (Crores INR)'])
+    df['Norm Risk'] = 1 - min_max_norm(df['Risk Score'])
+    df['Norm Momentum'] = min_max_norm(df['Momentum'])
+
+    df['Score'] = (
+        df['Norm 3Y Return'] * 0.7 +
+        df['Norm AUM'] * 0.15 +
+        df['Norm Risk'] * 0.10 +
+        df['Norm Momentum'] * 0.05
+    )
     return df
 
-# === Add Derived Features ===
-today = pd.to_datetime('today')
-df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
-
-def assign_category(name):
-    name = name.lower()
-    if 'large cap' in name:
-        return 'Large Cap'
-    elif 'midcap' in name or 'mid cap' in name:
-        return 'Mid Cap'
-    elif 'small cap' in name or 'smallcap' in name:
-        return 'Small Cap'
-    elif 'tax saver' in name or 'tax relief' in name or 'tax plan' in name:
-        return 'Tax Saver'
-    elif 'balanced' in name or 'hybrid' in name:
-        return 'Hybrid'
-    else:
-        return 'Others'
-
-df['Category'] = df['Scheme Name'].apply(assign_category)
-
-np.random.seed(42)
-df['AUM (Crores INR)'] = np.random.randint(10, 10000, size=len(df))
-
-risk_map = {'Low': 1, 'Moderate': 2, 'High': 3}
-df['Risk Score'] = df['Risk Level'].map(risk_map).fillna(2)
-
-df['Momentum'] = ((df['1-Year Return (%)'] + df['3-Year Return (%)']) / 2) - df['5-Year Return (%)']
-
-def min_max_norm(series):
-    return (series - series.min()) / (series.max() - series.min())
-
-df['Norm 3Y Return'] = min_max_norm(df['3-Year Return (%)'])
-df['Norm AUM'] = min_max_norm(df['AUM (Crores INR)'])
-df['Norm Risk'] = 1 - min_max_norm(df['Risk Score'])
-df['Norm Momentum'] = min_max_norm(df['Momentum'])
-
-df['Score'] = (
-    df['Norm 3Y Return'] * 0.7 +
-    df['Norm AUM'] * 0.15 +
-    df['Norm Risk'] * 0.10 +
-    df['Norm Momentum'] * 0.05
-)
+# Load data and prepare
+df = load_data()
 
 # === Streamlit UI ===
 

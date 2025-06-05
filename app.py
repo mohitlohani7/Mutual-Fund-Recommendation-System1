@@ -4,179 +4,140 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime
 
-# === Page Configuration ===
 st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
-# === Load and Process Data ===
 @st.cache_data
-def load_and_process_data():
-    df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
+def load_data():
+    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=';')
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
+    df['Net Asset Value (NAV)'] = pd.to_numeric(df['Net Asset Value (NAV)'], errors='coerce')
+    
+    # Add derived features
+    df['Fund Age (years)'] = (pd.to_datetime('today') - df['Date']).dt.days / 365
 
-    # Fund age
-    today = pd.to_datetime('today')
-    df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
-
-    # Category
-    def assign_category(name):
+    def get_category(name):
         name = name.lower()
-        if 'large cap' in name:
-            return 'Large Cap'
-        elif 'midcap' in name or 'mid cap' in name:
-            return 'Mid Cap'
-        elif 'small cap' in name or 'smallcap' in name:
-            return 'Small Cap'
-        elif 'tax saver' in name or 'tax relief' in name or 'tax plan' in name:
-            return 'Tax Saver'
-        elif 'balanced' in name or 'hybrid' in name:
-            return 'Hybrid'
+        if "large cap" in name:
+            return "Large Cap"
+        elif "midcap" in name or "mid cap" in name:
+            return "Mid Cap"
+        elif "smallcap" in name or "small cap" in name:
+            return "Small Cap"
+        elif "tax" in name:
+            return "Tax Saver"
+        elif "hybrid" in name or "balanced" in name:
+            return "Hybrid"
         else:
-            return 'Others'
+            return "Others"
 
-    df['Category'] = df['Scheme Name'].apply(assign_category)
+    df['Category'] = df['Scheme Name'].apply(get_category)
 
-    # Add derived metrics
+    # Simulate AUM
     np.random.seed(42)
-    df['AUM (Crores INR)'] = np.random.randint(10, 10000, size=len(df))
+    df['AUM (Crores INR)'] = np.random.randint(100, 10000, size=len(df))
 
-    risk_map = {'Low': 1, 'Moderate': 2, 'High': 3}
-    df['Risk Score'] = df['Risk Level'].map(risk_map).fillna(2)
+    # Clean & normalize returns
+    df['1-Year Return (%)'] = pd.to_numeric(df['1-Year Return (%)'], errors='coerce')
+    df['3-Year Return (%)'] = pd.to_numeric(df['3-Year Return (%)'], errors='coerce')
+    df['5-Year Return (%)'] = pd.to_numeric(df['5-Year Return (%)'], errors='coerce')
+
+    risk_map = {"Low": 1, "Moderate": 2, "High": 3}
+    df['Risk Score'] = df['Risk Level'].map(risk_map)
 
     df['Momentum'] = ((df['1-Year Return (%)'] + df['3-Year Return (%)']) / 2) - df['5-Year Return (%)']
 
-    def min_max_norm(series):
-        return (series - series.min()) / (series.max() - series.min())
-
-    df['Norm 3Y Return'] = min_max_norm(df['3-Year Return (%)'])
-    df['Norm AUM'] = min_max_norm(df['AUM (Crores INR)'])
-    df['Norm Risk'] = 1 - min_max_norm(df['Risk Score'])
-    df['Norm Momentum'] = min_max_norm(df['Momentum'])
+    # Normalize for scoring
+    def normalize(col):
+        return (col - col.min()) / (col.max() - col.min())
 
     df['Score'] = (
-        df['Norm 3Y Return'] * 0.7 +
-        df['Norm AUM'] * 0.15 +
-        df['Norm Risk'] * 0.10 +
-        df['Norm Momentum'] * 0.05
+        normalize(df['3-Year Return (%)']) * 0.6 +
+        normalize(df['AUM (Crores INR)']) * 0.2 +
+        (1 - normalize(df['Risk Score'])) * 0.1 +
+        normalize(df['Momentum']) * 0.1
     )
 
-    return df
+    return df.dropna()
 
-# === Load Data ===
-df = load_and_process_data()
+df = load_data()
 
-# === UI Header ===
-st.title("💼 Mutual Fund Recommender Pro")
+# Sidebar Inputs
+st.sidebar.title("Investor Preferences")
 
-# === Sidebar Inputs ===
-st.sidebar.header("Customize Your Investment")
+risk = st.sidebar.selectbox("Risk Level", ['Low', 'Moderate', 'High'])
+category = st.sidebar.multiselect("Fund Category", df['Category'].unique(), default=df['Category'].unique())
+aum_threshold = st.sidebar.slider("Minimum AUM (₹ Cr)", 0, int(df['AUM (Crores INR)'].max()), 500)
 
-risk_input = st.sidebar.selectbox("Select Risk Appetite", ['Low', 'Moderate', 'High'])
-category_input = st.sidebar.multiselect("Select Fund Category", options=df['Category'].unique(), default=list(df['Category'].unique()))
-min_aum_input = st.sidebar.slider("Minimum AUM (in Crores)", 0, int(df['AUM (Crores INR)'].max()), 100)
+inv_type = st.sidebar.radio("Investment Type", ['SIP', 'Lump Sum'])
+years = st.sidebar.slider("Investment Duration (Years)", 1, 30, 5)
 
-inv_type = st.sidebar.radio("Investment Type", ['Lump Sum', 'SIP'])
-
-if inv_type == 'Lump Sum':
-    lump_sum_amount = st.sidebar.number_input("Lump Sum Amount (₹)", min_value=1000, step=1000, value=50000)
-    inv_period = st.sidebar.slider("Investment Period (Years)", 1, 20, 5)
+if inv_type == 'SIP':
+    amount = st.sidebar.number_input("Monthly SIP Amount (₹)", min_value=500, step=500, value=5000)
 else:
-    sip_amount = st.sidebar.number_input("Monthly SIP Amount (₹)", min_value=500, step=500, value=5000)
-    inv_period = st.sidebar.slider("Investment Period (Years)", 1, 20, 5)
+    amount = st.sidebar.number_input("Lump Sum Amount (₹)", min_value=1000, step=1000, value=50000)
 
-# === Filter Data ===
+# Filter data
 filtered_df = df[
-    (df['Risk Level'] == risk_input) &
-    (df['Category'].isin(category_input)) &
-    (df['AUM (Crores INR)'] >= min_aum_input)
+    (df['Risk Level'] == risk) &
+    (df['Category'].isin(category)) &
+    (df['AUM (Crores INR)'] >= aum_threshold)
 ]
 
 if filtered_df.empty:
-    st.warning("No funds found for your selected criteria.")
+    st.warning("No funds match your criteria.")
     st.stop()
 
-filtered_df = filtered_df.sort_values(by='Score', ascending=False)
+filtered_df = filtered_df.sort_values(by="Score", ascending=False)
 
-# === Recommendation Section ===
-st.subheader("🌟 Top Recommended Funds")
-for idx, row in filtered_df.head(3).iterrows():
-    st.markdown(f"### {row['Scheme Name']} (Score: {row['Score']:.3f})")
-    st.write(f"- **Category**: {row['Category']}")
-    st.write(f"- **Risk Level**: {row['Risk Level']}")
-    st.write(f"- **AUM**: ₹{row['AUM (Crores INR)']:.2f} Cr")
-    st.write(f"- **3-Year Return**: {row['3-Year Return (%)']:.2f}%")
-    st.write(f"- **Momentum**: {row['Momentum']:.2f}")
-    st.markdown("---")
+# Top Funds Display
+st.title("📈 Mutual Fund Recommender Pro")
+st.subheader("Top 3 Mutual Funds for You")
 
-# === Bubble Chart ===
-st.subheader("📊 Risk vs Return Visualization")
-fig = px.scatter(
-    filtered_df,
-    x='Risk Score',
-    y='3-Year Return (%)',
-    size='AUM (Crores INR)',
-    color='Category',
-    hover_name='Scheme Name',
-    title='Risk vs 3-Year Return (Bubble size = AUM)'
-)
-st.plotly_chart(fig, use_container_width=True)
+for i, row in filtered_df.head(3).iterrows():
+    st.markdown(f"### 🏦 {row['Scheme Name']}")
+    st.write(f"- Risk Level: **{row['Risk Level']}**")
+    st.write(f"- Category: **{row['Category']}**")
+    st.write(f"- 3Y Return: **{row['3-Year Return (%)']:.2f}%**")
+    st.write(f"- AUM: ₹{row['AUM (Crores INR)']:.2f} Cr")
+    st.write(f"- Score: **{row['Score']:.3f}**")
 
-# === Investment Calculator ===
-st.header("💰 Investment Growth Estimator")
-
+# Investment Projection
+top_return = filtered_df.iloc[0]['3-Year Return (%)'] / 100
 if inv_type == 'Lump Sum':
-    annual_return = filtered_df.iloc[0]['3-Year Return (%)'] / 100
-    principal = lump_sum_amount
-    maturity = principal * ((1 + annual_return) ** inv_period)
-
-    st.markdown(f"**Lump Sum Investment:** ₹{principal:,}")
-    st.markdown(f"**Expected Value after {inv_period} years:** ₹{maturity:,.2f}")
-
-    years = list(range(inv_period + 1))
-    values = [principal * ((1 + annual_return) ** y) for y in years]
-
-    df_growth = pd.DataFrame({
-        "Year": years,
-        "Investment Value": values,
-        "Principal": [principal] * len(values)
-    })
-
-    fig2 = px.line(df_growth, x='Year', y=['Principal', 'Investment Value'], markers=True, title="Lump Sum Growth Over Time")
-    st.plotly_chart(fig2, use_container_width=True)
-
+    maturity = amount * ((1 + top_return) ** years)
 else:
-    months = inv_period * 12
-    annual_return = filtered_df.iloc[0]['3-Year Return (%)'] / 100
-    monthly_return = (1 + annual_return) ** (1 / 12) - 1
+    monthly_rate = (1 + top_return) ** (1/12) - 1
+    months = years * 12
+    maturity = amount * (((1 + monthly_rate) ** months - 1) / monthly_rate) * (1 + monthly_rate)
 
-    fv = sip_amount * (((1 + monthly_return) ** months - 1) / monthly_return) * (1 + monthly_return)
+st.subheader("💹 Investment Projection")
+st.write(f"Estimated Maturity Amount after {years} years: **₹{maturity:,.2f}**")
 
-    st.markdown(f"**Monthly SIP:** ₹{sip_amount:,}")
-    st.markdown(f"**Expected Value after {inv_period} years:** ₹{fv:,.2f}")
+# Category Pie Chart
+cat_data = filtered_df['Category'].value_counts()
+st.plotly_chart(px.pie(names=cat_data.index, values=cat_data.values, title="Category Distribution"))
 
-    years = list(range(inv_period + 1))
-    sip_growth = []
-    for y in years:
-        m = y * 12
-        if m == 0:
-            sip_growth.append(0)
-        else:
-            sip_growth.append(sip_amount * (((1 + monthly_return) ** m - 1) / monthly_return) * (1 + monthly_return))
+# Risk vs Return Bubble Chart
+fig_bubble = px.scatter(
+    filtered_df,
+    x="Risk Score",
+    y="3-Year Return (%)",
+    size="AUM (Crores INR)",
+    color="Category",
+    hover_name="Scheme Name",
+    title="Risk vs 3-Year Return Bubble Chart"
+)
+st.plotly_chart(fig_bubble, use_container_width=True)
 
-    df_sip = pd.DataFrame({
-        "Year": years,
-        "Investment Value": sip_growth,
-        "Principal": [sip_amount * 12 * y for y in years]
-    })
+# NAV Trend (Top Fund)
+st.subheader("📉 NAV Trend of Top Fund")
+nav_df = filtered_df[['Date', 'Net Asset Value (NAV)', 'Scheme Name']].sort_values('Date')
+top_scheme = nav_df['Scheme Name'].iloc[0]
+nav_df_top = nav_df[nav_df['Scheme Name'] == top_scheme]
 
-    fig3 = px.line(df_sip, x='Year', y=['Principal', 'Investment Value'], markers=True, title="SIP Growth Over Time")
-    st.plotly_chart(fig3, use_container_width=True)
-
-# === Pie Chart for Fund Distribution ===
-st.header("📈 Fund Category Distribution")
-cat_counts = filtered_df['Category'].value_counts()
-fig4 = px.pie(values=cat_counts.values, names=cat_counts.index, title="Selected Fund Categories")
-st.plotly_chart(fig4, use_container_width=True)
+if not nav_df_top.empty:
+    fig_nav = px.line(nav_df_top, x='Date', y='Net Asset Value (NAV)', title=f"NAV Trend - {top_scheme}")
+    st.plotly_chart(fig_nav, use_container_width=True)
 
 st.markdown("---")
-st.caption("© 2025 Mutual Fund Recommender Pro — For Educational Use Only")
+st.markdown("© 2025 Mutual Fund Recommender Pro | Powered by Streamlit")

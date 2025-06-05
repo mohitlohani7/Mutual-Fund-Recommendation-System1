@@ -1,120 +1,128 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.express as px
 
-# Page config
-st.set_page_config(page_title="Mutual Fund Investment Dashboard", layout="wide")
+# ----------------------- PAGE CONFIG ----------------------- #
+st.set_page_config(page_title="💼 Mutual Fund Recommender Pro", layout="wide")
 
+# ----------------------- LOAD DATA ------------------------ #
 @st.cache_data
-def load_data():
-    try:
-        df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
-        df.columns = df.columns.str.strip()  # Clean column names
-        return df
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return pd.DataFrame()  # Return empty DataFrame on error
 
-# Load data
+def load_data():
+    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=";")
+    df.columns = df.columns.str.strip()
+    df.rename(columns={
+        "Net Asset Value (NAV)": "NAV",
+        "1Y_Return": "1Y_Return",
+        "3Y_Return": "3Y_Return",
+        "5Y_Return": "5Y_Return"
+    }, inplace=True)
+    return df.dropna(subset=['NAV', '1Y_Return', '3Y_Return', '5Y_Return', 'Risk'])
+
+# --------------------- FUNCTION: CALCULATION ------------------ #
+def calculate_growth(amount, rate_percent, years, mode):
+    if mode == "Lump Sum":
+        final = amount * ((1 + rate_percent/100) ** years)
+        return final
+    else:  # SIP
+        monthly_rate = rate_percent / (12 * 100)
+        months = years * 12
+        final = amount * (((1 + monthly_rate) ** months - 1) * (1 + monthly_rate)) / monthly_rate
+        return final
+
+# --------------------- MAIN APP ----------------------------- #
 df = load_data()
 
-if df.empty:
-    st.error("Failed to load mutual funds data or the dataset is empty. Please check your CSV file.")
-    st.stop()
+if df is not None and not df.empty:
+    st.title("💼 Mutual Fund Recommender Pro")
+    st.markdown("""
+    Empower your financial journey by investing smartly. Choose between **SIP** or **Lump Sum**, select your risk appetite,
+    and get the top mutual fund recommendations with return forecasts and visuals to help guide your decision.
+    """)
 
-# Title & description
-st.title("📈 Mutual Fund Investment Dashboard")
-st.markdown(
-    """
-    Invest smartly by comparing mutual funds based on your risk appetite and investment duration.
-    Use the controls on the left to customize your investment preferences.
-    """
-)
+    st.sidebar.header("📊 Investment Preferences")
+    invest_mode = st.sidebar.radio("Select Investment Type:", ["SIP", "Lump Sum"])
+    amount = st.sidebar.number_input(f"Monthly Amount (₹)" if invest_mode=="SIP" else "One-time Amount (₹)", min_value=500, step=500, value=5000)
+    tenure = st.sidebar.slider("Investment Tenure (Years)", min_value=1, max_value=30, value=5)
 
-# Sidebar Inputs
-st.sidebar.header("Investment Preferences")
-amount = st.sidebar.number_input("Investment Amount (₹)", min_value=1000, step=1000, value=10000, format="%d")
-duration = st.sidebar.selectbox("Investment Duration (Years)", options=[1, 3, 5], index=1)
+    risk = st.sidebar.selectbox("Select Risk Appetite", options=['Low', 'Moderate', 'High'])
 
-risk_options = df['Risk'].dropna().unique()
-risk_appetite = st.sidebar.multiselect("Select Risk Appetite", options=risk_options, default=risk_options)
+    # Map tenure to return column
+    if tenure <= 1:
+        return_col = "1Y_Return"
+    elif tenure <= 3:
+        return_col = "3Y_Return"
+    else:
+        return_col = "5Y_Return"
 
-# Filter data by selected risk appetite
-filtered_df = df[df['Risk'].isin(risk_appetite)]
+    # Filter and sort mutual funds
+    filtered = df[df['Risk'].str.lower() == risk.lower()].sort_values(by=return_col, ascending=False)
+    top_funds = filtered.head(5).copy()
 
-if filtered_df.empty:
-    st.warning("No mutual funds match the selected risk appetite.")
-    st.stop()
+    if top_funds.empty:
+        st.error("No mutual funds match your selected risk level.")
+    else:
+        st.subheader(f"🏆 Top {len(top_funds)} Mutual Funds for {risk} Risk Appetite")
+        st.dataframe(top_funds[['Scheme Name', 'NAV', return_col, 'Risk']], use_container_width=True)
 
-return_col = f"{duration}Y_Return"
+        st.markdown("---")
+        st.subheader("📈 Investment Growth Overview")
 
-if return_col not in filtered_df.columns:
-    st.error(f"Return data for {duration} years is not available.")
-    st.stop()
+        # Compute projected growth
+        projections = []
+        for _, row in top_funds.iterrows():
+            projected = calculate_growth(amount, row[return_col], tenure, invest_mode)
+            total_invested = amount * tenure * 12 if invest_mode == "SIP" else amount
+            gain = projected - total_invested
+            projections.append({
+                "Fund": row['Scheme Name'],
+                "Invested": total_invested,
+                "Return": round(projected, 2),
+                "Gain": round(gain, 2),
+                "Rate": row[return_col]
+            })
 
-filtered_df = filtered_df.dropna(subset=[return_col])
-filtered_df = filtered_df.sort_values(by=return_col, ascending=False)
+        proj_df = pd.DataFrame(projections)
 
-# Display filtered funds
-st.subheader(f"Funds filtered by risk {risk_appetite} and sorted by {duration}-year return")
+        # Show Pie Chart of Gain vs Invested
+        selected_fund = st.selectbox("Select a Fund to Visualize Growth", proj_df['Fund'])
+        sel_row = proj_df[proj_df['Fund'] == selected_fund].iloc[0]
+        pie_data = pd.DataFrame({
+            "Label": ["Invested Amount", "Estimated Gain"],
+            "Value": [sel_row['Invested'], sel_row['Gain']]
+        })
 
-st.dataframe(
-    filtered_df[['Scheme Name', 'NAV', return_col, 'Risk']].rename(
-        columns={return_col: f"{duration} Year Return (%)", 'NAV': 'Net Asset Value (₹)', 'Risk': 'Risk Category'}
-    ),
-    use_container_width=True,
-)
+        pie_fig = px.pie(pie_data, names='Label', values='Value', title=f"{selected_fund} - Investment Composition",
+                         color_discrete_sequence=['#636EFA', '#00CC96'])
+        st.plotly_chart(pie_fig, use_container_width=True)
 
-# Show Top 3 Recommendations
-top3 = filtered_df.head(3)
+        # Show Bar chart for all top 5 funds
+        bar_fig = px.bar(
+            proj_df,
+            x="Fund",
+            y="Return",
+            color="Fund",
+            title="📊 Projected Final Value per Fund",
+            labels={"Return": "Final Value (₹)"},
+            text_auto=".2s"
+        )
+        st.plotly_chart(bar_fig, use_container_width=True)
 
-st.markdown("### 🔥 Top 3 Recommended Funds:")
-for i, row in top3.iterrows():
-    st.markdown(
-        f"**{row['Scheme Name']}** | NAV: ₹{row['NAV']:.2f} | "
-        f"{duration} Year Return: {row[return_col]:.2f}% | Risk: {row['Risk']}"
-    )
+        st.markdown("---")
+        st.subheader("📄 Investment Summary Sheet")
+        st.dataframe(proj_df.set_index("Fund"), use_container_width=True)
 
-# NAV Trend Chart (Simulated)
-st.subheader("NAV Trend Chart (Simulated)")
+        st.markdown("""
+        > 💡 *Returns shown are based on historical data and estimations. Actual results may vary.*
+        """)
+else:
+    st.error("⚠️ Failed to load mutual fund data. Please check the CSV file path and structure.")
 
-dates = pd.date_range(start="2021-01-01", periods=12, freq='M')
-fig, ax = plt.subplots(figsize=(10, 5))
+# ---------------------- FOOTER ---------------------- #
+st.markdown("""
+---
+**🔐 Disclaimer:** This dashboard is for educational and demo purposes only. Always consult a certified financial advisor before investing.
 
-for _, row in top3.iterrows():
-    nav_trend = row['NAV'] * (1 + np.linspace(-0.05, 0.05, len(dates)))  # Simulated NAV fluctuations
-    ax.plot(dates, nav_trend, label=row['Scheme Name'])
-
-ax.set_title("NAV Trend (Last 12 Months, Simulated)")
-ax.set_xlabel("Date")
-ax.set_ylabel("NAV (₹)")
-ax.legend()
-ax.grid(True)
-
-st.pyplot(fig)
-
-# Investment Projection
-st.subheader("Investment Projection")
-
-def projected_value(principal, rate_percent, years):
-    return principal * (1 + rate_percent / 100) ** years
-
-for _, row in top3.iterrows():
-    proj_val = projected_value(amount, row[return_col], duration)
-    st.markdown(
-        f"**If you invest ₹{amount:,} in {row['Scheme Name']} for {duration} years at "
-        f"{row[return_col]:.2f}% annual return, your projected value will be: ₹{proj_val:,.2f}**"
-    )
-
-# Footer disclaimer
-st.markdown("---")
-st.markdown(
-    """
-    <small>
-    **Disclaimer:** This dashboard provides simulated data for demonstration purposes only.
-    Please consult a certified financial advisor before making investment decisions.
-    </small>
-    """,
-    unsafe_allow_html=True,
-)
+Built with ❤️ using Streamlit
+""")

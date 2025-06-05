@@ -7,44 +7,17 @@ from datetime import datetime
 st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
 @st.cache_data
-def load_and_process_data():
+def load_data():
     df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
-    
-    # Derived columns inside the same function:
+
+    # Derived Features
     today = pd.to_datetime('today')
     df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
 
     def assign_category(name):
-        name = name.lower()
-        if 'large cap' in name:
-            return 'Large Cap'
-        elif 'midcap' in name or 'mid cap' in name:
-            return 'Mid Cap'
-        elif 'small cap' in name or 'smallcap' in name:
-            return 'Small Cap'
-        elif 'tax saver' in name or 'tax relief' in name or 'tax plan' in name:
-            return 'Tax Saver'
-        elif 'balanced' in name or 'hybrid' in name:
-            return 'Hybrid'
-        else:
-            return 'Others'
-
-    df['Category'] = df['Scheme Name'].apply(assign_category)
-
-    # Other derived columns here...
-
-    return df
-
-
-
-    # === Add Derived Features ===
-    today = pd.to_datetime('today')
-    df['Fund Age (years)'] = (today - df['Date']).dt.days / 365
-
-    def assign_category(name):
-        name = name.lower()
+        name = str(name).lower()
         if 'large cap' in name:
             return 'Large Cap'
         elif 'midcap' in name or 'mid cap' in name:
@@ -89,10 +62,10 @@ df = load_data()
 
 # === Streamlit UI ===
 
-st.title("\U0001F680 Advanced Mutual Fund Recommendation System")
+st.title("🚀 Advanced Mutual Fund Recommendation System")
 
 risk_input = st.sidebar.selectbox("Select your Risk Appetite", ['Low', 'Moderate', 'High'])
-category_input = st.sidebar.multiselect("Select Fund Category", options=df['Category'].unique(), default=df['Category'].unique())
+category_input = st.sidebar.multiselect("Select Fund Category", options=df['Category'].unique(), default=list(df['Category'].unique()))
 min_aum_input = st.sidebar.slider("Minimum AUM (Crores INR)", 0, int(df['AUM (Crores INR)'].max()), 100)
 
 inv_type = st.sidebar.radio("Investment Type", ['Lump Sum', 'SIP'])

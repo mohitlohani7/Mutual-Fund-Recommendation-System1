@@ -1,4 +1,4 @@
-Scheme Code;Scheme Name;Net Asset Value (NAV);Date;1-Year Return (%);3-Year Return (%);5-Year Return (%);Risk Level;Category
+Scheme Code;Scheme Name;Net Asset Value (NAV);Date;1-Year Return (%);3-Year Return (%);5-Year Return (%);Risk;Category
 100001;SBI Bluechip Fund;42.35;2025-06-01;12.5;15.3;14.7;Moderate
 100002;HDFC Equity Fund;59.20;2025-06-01;14.1;16.8;15.6;Moderate
 100003;ICICI Prudential Bluechip Fund;31.45;2025-06-01;13.7;15.9;15.2;Moderate

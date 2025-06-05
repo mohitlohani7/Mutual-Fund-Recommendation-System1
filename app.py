@@ -1,118 +1,94 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.graph_objs as go
-from datetime import datetime
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
+st.set_page_config(page_title="Mutual Fund Investment Dashboard", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data/mutual_funds_enriched.csv", sep=';')
-    # Clean column names if needed
-    df.columns = df.columns.str.strip()
-    # Convert returns to numeric
-    df["1-Year Return (%)"] = pd.to_numeric(df["1-Year Return (%)"], errors='coerce')
-    df["3-Year Return (%)"] = pd.to_numeric(df["3-Year Return (%)"], errors='coerce')
-    df["5-Year Return (%)"] = pd.to_numeric(df["5-Year Return (%)"], errors='coerce')
+    df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
     return df
 
 df = load_data()
 
-st.title("📊 Mutual Fund Investment Recommender")
+st.title("📈 Mutual Fund Investment Dashboard")
+st.markdown(
+    """
+    Invest smartly by comparing mutual funds based on your risk appetite and investment duration.
+    """)
 
-# Sidebar Inputs
-st.sidebar.header("Investment Details")
-
-investment_type = st.sidebar.selectbox("Investment Type", ["Lump Sum", "SIP"])
-
-amount = st.sidebar.number_input("Investment Amount (₹)", min_value=1000, step=1000)
-
-investment_duration_years = st.sidebar.slider("Investment Duration (Years)", min_value=1, max_value=30, value=5)
-
-risk_levels = df["Risk Level"].unique().tolist()
-risk_level = st.sidebar.selectbox("Risk Level", risk_levels)
-
-categories = df["Category"].unique().tolist()
-category = st.sidebar.selectbox("Mutual Fund Category", categories)
-
-# Filter dataframe by risk level and category
-filtered_df = df[(df["Risk Level"] == risk_level) & (df["Category"] == category)]
-
-if filtered_df.empty:
-    st.warning("No mutual funds found for the selected Risk Level and Category.")
-    st.stop()
-
-st.subheader(f"Available Mutual Funds for Risk: {risk_level} & Category: {category}")
-
-# Show filtered funds summary
-st.dataframe(filtered_df[["Scheme Name", "Net Asset Value (NAV)", "1-Year Return (%)", "3-Year Return (%)", "5-Year Return (%)", "Risk Level"]].reset_index(drop=True))
-
-# Function to calculate maturity amount for lump sum
-def calc_lump_sum_maturity(P, r, t):
-    # P = Principal invested, r = annual return rate in decimal, t = time in years
-    A = P * ((1 + r) ** t)
-    return A
-
-# Function to calculate maturity amount for SIP (monthly)
-def calc_sip_maturity(monthly_investment, r, t):
-    # monthly_investment = amount invested per month
-    # r = annual rate of return in decimal
-    # t = time in years
-    n = t * 12  # total months
-    monthly_rate = (1 + r) ** (1/12) - 1
-    A = monthly_investment * (( (1 + monthly_rate) ** n - 1) / monthly_rate) * (1 + monthly_rate)
-    return A
-
-# Choose which return to use for CAGR estimation
-st.sidebar.markdown("### Choose Return Duration to Calculate Estimated Returns")
-return_duration = st.sidebar.radio("Return Duration", ["1-Year Return (%)", "3-Year Return (%)", "5-Year Return (%)"])
-
-# Calculate estimated maturity for each fund
-estimates = []
-for idx, row in filtered_df.iterrows():
-    r = row[return_duration] / 100  # convert % to decimal
-    if investment_type == "Lump Sum":
-        maturity = calc_lump_sum_maturity(amount, r, investment_duration_years)
-    else:
-        maturity = calc_sip_maturity(amount, r, investment_duration_years)
-    estimates.append(maturity)
-
-filtered_df["Estimated Maturity (₹)"] = estimates
-
-# Sort funds by estimated maturity descending
-filtered_df = filtered_df.sort_values(by="Estimated Maturity (₹)", ascending=False).reset_index(drop=True)
-
-st.subheader("Recommended Mutual Funds Based on Your Inputs")
-
-# Display top 10 recommendations
-top_n = 10
-top_funds = filtered_df.head(top_n)
-st.dataframe(top_funds[["Scheme Name", "Risk Level", "Category", return_duration, "Estimated Maturity (₹)"]])
-
-# Plot maturity amount bar chart
-fig = go.Figure()
-fig.add_trace(go.Bar(
-    x=top_funds["Scheme Name"],
-    y=top_funds["Estimated Maturity (₹)"],
-    marker_color='indianred'
-))
-fig.update_layout(
-    title=f"Estimated Maturity Amount after {investment_duration_years} Years",
-    xaxis_title="Mutual Fund Scheme",
-    yaxis_title="Maturity Amount (₹)",
-    xaxis_tickangle=-45,
-    height=500,
-    margin=dict(t=50, b=150)
+# Sidebar inputs
+st.sidebar.header("Investment Preferences")
+amount = st.sidebar.number_input("Investment Amount (₹)", min_value=1000, step=1000, value=10000)
+duration = st.sidebar.selectbox("Investment Duration (Years)", options=[1, 3, 5])
+risk_appetite = st.sidebar.multiselect(
+    "Select Risk Appetite",
+    options=df['Risk'].unique(),
+    default=df['Risk'].unique()
 )
 
-st.plotly_chart(fig, use_container_width=True)
+# Filter data based on risk appetite
+filtered_df = df[df['Risk'].isin(risk_appetite)]
 
-st.markdown("""
----
-**Note:**  
-- The returns are estimated based on historical annual returns; actual returns may vary.  
-- SIP assumes monthly investments on a compounding basis.  
-- Lump sum assumes one-time investment compounding annually.  
-- Always consult a financial advisor before investing.
-""")
+# Select return column based on duration
+return_col = f"{duration}Y_Return"
+
+# Sort by return descending
+filtered_df = filtered_df.sort_values(by=return_col, ascending=False)
+
+st.subheader(f"Funds filtered by risk {risk_appetite} and sorted by {duration} year return")
+
+# Display top 10 funds
+st.dataframe(filtered_df[['Scheme Name', 'NAV', return_col, 'Risk']].rename(
+    columns={return_col: f"{duration} Year Return (%)"}), use_container_width=True)
+
+# Recommend top 3 funds
+top3 = filtered_df.head(3)
+
+st.markdown("### 🔥 Top 3 Recommended Funds:")
+for idx, row in top3.iterrows():
+    st.markdown(f"**{row['Scheme Name']}** | NAV: ₹{row['NAV']} | "
+                f"{duration} Year Return: {row[return_col]}% | Risk: {row['Risk']}")
+
+# NAV Trend Chart (Dummy static chart as we only have one date currently)
+st.subheader("NAV Trend Chart (Demo)")
+st.markdown(
+    """
+    *(NAV trend for selected funds over time will be displayed here when historical NAV data is available.)*
+    """
+)
+
+# Plot example NAV trend for top 3 funds (dummy data)
+import numpy as np
+dates = pd.date_range(start="2021-01-01", periods=12, freq='M')
+fig, ax = plt.subplots(figsize=(10, 5))
+for idx, row in top3.iterrows():
+    nav_trend = row['NAV'] * (1 + np.linspace(-0.05, 0.05, len(dates)))  # Dummy fluctuating NAV
+    ax.plot(dates, nav_trend, label=row['Scheme Name'])
+
+ax.set_title("NAV Trend (Last 12 Months, Simulated)")
+ax.set_xlabel("Date")
+ax.set_ylabel("NAV (₹)")
+ax.legend()
+ax.grid(True)
+st.pyplot(fig)
+
+# Investment projection (simple compound interest)
+st.subheader("Investment Projection")
+
+def projected_value(principal, rate_percent, years):
+    return principal * (1 + rate_percent/100)**years
+
+for idx, row in top3.iterrows():
+    proj_val = projected_value(amount, row[return_col], duration)
+    st.markdown(f"**If you invest ₹{amount} in {row['Scheme Name']} for {duration} years at "
+                f"{row[return_col]}% annual return, your projected value: ₹{proj_val:,.2f}**")
+
+# Footer with disclaimers
+st.markdown("---")
+st.markdown(
+    """
+    **Disclaimer:** This dashboard provides simulated data and is for educational/demo purposes only.
+    Please consult a certified financial advisor before making investment decisions.
+    """
+)

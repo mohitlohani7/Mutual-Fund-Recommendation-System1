@@ -8,9 +8,11 @@ st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv('mutual funds enriched.csv', sep=';')
+    df = pd.read_csv('data/mutual_funds_enriched.csv', sep=';')
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
+    return df
+
 
     # === Add Derived Features ===
     today = pd.to_datetime('today')

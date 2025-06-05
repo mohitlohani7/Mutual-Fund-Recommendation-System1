@@ -8,19 +8,17 @@ st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv('data/mutual funds.csv', sep=';')
-    df.columns = df.columns.str.strip()
-
-    # Convert relevant columns
-    df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
-    df["1-Year Return (%)"] = pd.to_numeric(df["1-Year Return (%)"], errors='coerce')
-    df["3-Year Return (%)"] = pd.to_numeric(df["3-Year Return (%)"], errors='coerce')
-    df["5-Year Return (%)"] = pd.to_numeric(df["5-Year Return (%)"], errors='coerce')
+    df = pd.read_csv('mutual_funds_enriched.csv', sep=';')  # updated filename
+    # You can add any cleaning/conversion code here as needed
+    # Example: convert date columns, numeric columns, etc.
+    # For example, if you have a 'Date' column:
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    
+    # Convert numeric columns if needed, e.g. NAV
+    df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
+    
+    return df
 
-    return df.dropna(subset=["Net Asset Value (NAV)", "Date"])
-
-df = load_data()
 
 # === Add Derived Features ===
 today = pd.to_datetime('today')

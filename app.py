@@ -8,15 +8,20 @@ st.set_page_config(page_title="Mutual Fund Recommender Pro", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv('data/mutual_funds.csv', sep=';')
+    df = pd.read_csv('data/mutual funds.csv', sep=';')  # ✅ Correct file path
+    df.columns = df.columns.str.strip()  # ✅ Remove trailing spaces in column names
+
+    # Optional rename if your file uses 'NAV'
+    if 'NAV' in df.columns:
+        df.rename(columns={'NAV': 'Net Asset Value (NAV)'}, inplace=True)
+
     df["Net Asset Value (NAV)"] = pd.to_numeric(df["Net Asset Value (NAV)"], errors='coerce')
     df["1-Year Return (%)"] = pd.to_numeric(df["1-Year Return (%)"], errors='coerce')
     df["3-Year Return (%)"] = pd.to_numeric(df["3-Year Return (%)"], errors='coerce')
     df["5-Year Return (%)"] = pd.to_numeric(df["5-Year Return (%)"], errors='coerce')
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    return df.dropna(subset=["Net Asset Value (NAV)"])
 
-df = load_data()
+    return df.dropna(subset=["Net Asset Value (NAV)"])
 
 # === Add Derived Features ===
 

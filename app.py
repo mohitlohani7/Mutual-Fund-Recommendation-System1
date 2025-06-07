@@ -48,7 +48,7 @@ df = load_data()
 if df is not None and not df.empty:
     st.title("💼 Mutual Fund Recommender Pro")
     st.markdown("""
-    > 📊 *Personalized mutual fund recommendations based on your preferences, powered by AI.*
+    > 📊 *Personalized mutual fund recommendations based on your preferences, powered by Mohit Lohani.*
     """)
 
     # ----------- SIDEBAR INPUTS ----------- #

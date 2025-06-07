@@ -2,14 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import LabelEncoder
 
-# -------------------- PAGE CONFIG -------------------- #
+# ----------------------- PAGE CONFIG ----------------------- #
 st.set_page_config(page_title="💼 Mutual Fund Recommender Pro", layout="wide")
 
-# -------------------- LOAD DATA ---------------------- #
+# ----------------------- LOAD DATA ------------------------ #
 @st.cache_data
+
 def load_data():
     df = pd.read_csv("data/mutual_funds_enriched.csv", sep=";")
     df.columns = df.columns.str.strip()
@@ -21,126 +20,109 @@ def load_data():
     }, inplace=True)
     return df.dropna(subset=['NAV', '1Y_Return', '3Y_Return', '5Y_Return', 'Risk'])
 
-# ----------------- CALCULATE GROWTH ------------------ #
+# --------------------- FUNCTION: CALCULATION ------------------ #
 def calculate_growth(amount, rate_percent, years, mode):
     if mode == "Lump Sum":
-        return amount * ((1 + rate_percent / 100) ** years)
-    else:
+        final = amount * ((1 + rate_percent/100) ** years)
+        return final
+    else:  # SIP
         monthly_rate = rate_percent / (12 * 100)
         months = years * 12
-        return amount * (((1 + monthly_rate) ** months - 1) * (1 + monthly_rate)) / monthly_rate
+        final = amount * (((1 + monthly_rate) ** months - 1) * (1 + monthly_rate)) / monthly_rate
+        return final
 
-# ----------------- TRAIN PREDICTION MODEL ------------- #
-def train_predict_model(df, target_col):
-    df = df.copy()
-    features = ['NAV', '1Y_Return', '3Y_Return', '5Y_Return']
-    df['Risk_Code'] = LabelEncoder().fit_transform(df['Risk'])
-    X = df[features + ['Risk_Code']]
-    y = df[target_col]
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    df['Predicted_Return'] = model.predict(X)
-    return df
-
-# ---------------------- MAIN APP ---------------------- #
+# --------------------- MAIN APP ----------------------------- #
 df = load_data()
 
 if df is not None and not df.empty:
     st.title("💼 Mutual Fund Recommender Pro")
     st.markdown("""
-    > 📊 *Personalized mutual fund recommendations based on your preferences, powered by AI.*
+    Empower your financial journey by investing smartly. Choose between **SIP** or **Lump Sum**, select your risk appetite,
+    and get the top mutual fund recommendations with return forecasts and visuals to help guide your decision.
     """)
 
-    # ----------- SIDEBAR INPUTS ----------- #
-    st.sidebar.header("💰 Investment Preferences")
-    invest_mode = st.sidebar.radio("Investment Type", ["SIP", "Lump Sum"])
-    amount = st.sidebar.number_input("Investment Amount (₹)", min_value=500, value=5000, step=500)
-    tenure = st.sidebar.slider("Tenure (Years)", 1, 30, 5)
-    risk = st.sidebar.selectbox("Risk Appetite", ["Low", "Moderate", "High"])
+    st.sidebar.header("📊 Investment Preferences")
+    invest_mode = st.sidebar.radio("Select Investment Type:", ["SIP", "Lump Sum"])
+    amount = st.sidebar.number_input(f"Monthly Amount (₹)" if invest_mode=="SIP" else "One-time Amount (₹)", min_value=500, step=500, value=5000)
+    tenure = st.sidebar.slider("Investment Tenure (Years)", min_value=1, max_value=30, value=5)
 
-    # ----------- TARGET COLUMN ----------- #
+    risk = st.sidebar.selectbox("Select Risk Appetite", options=['Low', 'Moderate', 'High'])
+
+    # Map tenure to return column
     if tenure <= 1:
-        target_col = "1Y_Return"
+        return_col = "1Y_Return"
     elif tenure <= 3:
-        target_col = "3Y_Return"
+        return_col = "3Y_Return"
     else:
-        target_col = "5Y_Return"
+        return_col = "5Y_Return"
 
-    # ----------- ML MODEL PREDICTION ----------- #
-    df_model = train_predict_model(df, target_col)
-    df_filtered = df_model[df_model['Risk'].str.lower() == risk.lower()]
-    top_funds = df_filtered.sort_values(by="Predicted_Return", ascending=False).head(5).copy()
+    # Filter and sort mutual funds
+    filtered = df[df['Risk'].str.lower() == risk.lower()].sort_values(by=return_col, ascending=False)
+    top_funds = filtered.head(5).copy()
 
     if top_funds.empty:
-        st.error("⚠️ No mutual funds match your criteria.")
+        st.error("No mutual funds match your selected risk level.")
     else:
-        # ----------- CALCULATE PROJECTIONS ----------- #
+        st.subheader(f"🏆 Top {len(top_funds)} Mutual Funds for {risk} Risk Appetite")
+        st.dataframe(top_funds[['Scheme Name', 'NAV', return_col, 'Risk']], use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("📈 Investment Growth Overview")
+
+        # Compute projected growth
         projections = []
         for _, row in top_funds.iterrows():
-            rate = row["Predicted_Return"]
-            future_value = calculate_growth(amount, rate, tenure, invest_mode)
-            invested = amount * tenure * 12 if invest_mode == "SIP" else amount
-            gain = future_value - invested
+            projected = calculate_growth(amount, row[return_col], tenure, invest_mode)
+            total_invested = amount * tenure * 12 if invest_mode == "SIP" else amount
+            gain = projected - total_invested
             projections.append({
-                "Fund": row["Scheme Name"],
-                "NAV": row["NAV"],
-                "Predicted Rate": round(rate, 2),
-                "Invested": invested,
-                "Projected Return": round(future_value, 2),
-                "Gain": round(gain, 2)
+                "Fund": row['Scheme Name'],
+                "Invested": total_invested,
+                "Return": round(projected, 2),
+                "Gain": round(gain, 2),
+                "Rate": row[return_col]
             })
 
         proj_df = pd.DataFrame(projections)
-        best_fund = proj_df.sort_values(by="Gain", ascending=False).iloc[0]
 
-        # ----------- BEST FUND HIGHLIGHT ----------- #
-        st.markdown("## 🏆 Best Mutual Fund Recommendation")
-        st.success(f"""
-        **Top Pick:** `{best_fund['Fund']}`  
-        💰 Invested: ₹{best_fund['Invested']:,.2f}  
-        📈 Projected Return: ₹{best_fund['Projected Return']:,.2f}  
-        💹 Estimated Gain: ₹{best_fund['Gain']:,.2f}  
-        **Why this?**
-        - Highest AI-estimated growth
-        - Strong NAV & performance
-        - Matches your **{risk}** risk appetite
-        """)
-
-        # ----------- USER SELECTION ----------- #
-        st.markdown("### 🔄 Explore Other Options")
-        fund_options = proj_df["Fund"].tolist()
-        selected_fund = st.selectbox("Choose a fund to view details", fund_options, index=fund_options.index(best_fund["Fund"]))
-        selected_row = proj_df[proj_df["Fund"] == selected_fund].iloc[0]
-
-        # PIE CHART
-        pie_df = pd.DataFrame({
-            "Category": ["Invested", "Estimated Gain"],
-            "Value": [selected_row["Invested"], selected_row["Gain"]]
+        # Show Pie Chart of Gain vs Invested
+        selected_fund = st.selectbox("Select a Fund to Visualize Growth", proj_df['Fund'])
+        sel_row = proj_df[proj_df['Fund'] == selected_fund].iloc[0]
+        pie_data = pd.DataFrame({
+            "Label": ["Invested Amount", "Estimated Gain"],
+            "Value": [sel_row['Invested'], sel_row['Gain']]
         })
-        pie_fig = px.pie(pie_df, names="Category", values="Value",
-                         title=f"{selected_fund} - Investment Breakdown",
-                         color_discrete_sequence=["#636EFA", "#00CC96"])
+
+        pie_fig = px.pie(pie_data, names='Label', values='Value', title=f"{selected_fund} - Investment Composition",
+                         color_discrete_sequence=['#636EFA', '#00CC96'])
         st.plotly_chart(pie_fig, use_container_width=True)
 
-        # BAR CHART - All funds
-        st.markdown("### 📊 Projected Returns Across Funds")
-        bar_fig = px.bar(proj_df, x="Fund", y="Projected Return", color="Fund", text_auto=".2s",
-                         labels={"Projected Return": "₹ Projected Final Value"})
+        # Show Bar chart for all top 5 funds
+        bar_fig = px.bar(
+            proj_df,
+            x="Fund",
+            y="Return",
+            color="Fund",
+            title="📊 Projected Final Value per Fund",
+            labels={"Return": "Final Value (₹)"},
+            text_auto=".2s"
+        )
         st.plotly_chart(bar_fig, use_container_width=True)
 
-        # SUMMARY TABLE
-        st.markdown("### 📋 Investment Summary")
+        st.markdown("---")
+        st.subheader("📄 Investment Summary Sheet")
         st.dataframe(proj_df.set_index("Fund"), use_container_width=True)
 
-        st.markdown("> 📌 *Projections are based on historical and predicted trends. Market conditions may vary.*")
-
+        st.markdown("""
+        > 💡 *Returns shown are based on historical data and estimations. Actual results may vary.*
+        """)
 else:
-    st.error("❌ Failed to load mutual fund data. Please check your CSV and path.")
+    st.error("⚠️ Failed to load mutual fund data. Please check the CSV file path and structure.")
 
 # ---------------------- FOOTER ---------------------- #
 st.markdown("""
 ---
-🔐 **Disclaimer**: This is a demo tool for educational purposes only. Always consult a certified financial advisor before investing.
+**🔐 Disclaimer:** This dashboard is for educational and demo purposes only. Always consult a certified financial advisor before investing.
 
-Made with ❤️ using Streamlit
+Built with ❤️ using Streamlit
 """)

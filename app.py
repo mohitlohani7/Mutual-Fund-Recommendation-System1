@@ -48,7 +48,7 @@ df = load_data()
 if df is not None and not df.empty:
     st.title("💼 Mutual Fund Recommender Pro")
     st.markdown("""
-    > 📊 *Personalized mutual fund recommendations based on your preferences, powered by Mohit Lohani.*
+    > 📊 *Personalized mutual fund recommendations based on your preferences, **powered by Mohit Lohani**.*
     """)
 
     # ----------- SIDEBAR INPUTS ----------- #
@@ -142,5 +142,5 @@ st.markdown("""
 ---
 🔐 **Disclaimer**: This is a demo tool for educational purposes only. Always consult a certified financial advisor before investing.
 
-Made with ❤️ using Streamlit
+Made with ❤️ by **Mohit Lohani** using Streamlit
 """)
